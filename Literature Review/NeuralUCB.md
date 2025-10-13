@@ -1,90 +1,101 @@
-## 📖 CNN-UCB: Convolutional Neural Bandit for Visual-Aware Recommendation  
+## NeuralUCB: Neural Contextual Bandits with UCB Exploration  
 **Reference:**  
-Yikun Ban, Jingrui He. (2021). *Convolutional Neural Bandit for Visual-Aware Recommendation*. arXiv preprint arXiv:2107.07438.
+Zhou, D., Li, L., Li, J., Tang, L., & Gu, Q. (2020). *Neural Contextual Bandits with UCB-based Exploration.* Proceedings of the 37th International Conference on Machine Learning (ICML), PMLR 119:11492–11503.
 
 ---
 
 ### Goal and Motivation
-Classical contextual bandit algorithms, such as LinUCB, assume a linear relationship between context features and expected rewards. While these algorithms provide theoretical guarantees and computational efficiency, they fail to capture the complex, high-dimensional structure of visual contexts.  
+NeuralUCB extends the LinUCB algorithm to settings where the expected reward cannot be modeled as a linear function of the context. In many real-world applications, such as image-based recommendation or personalized feedback, the reward depends on complex, nonlinear relationships that linear models cannot capture. NeuralUCB replaces the linear assumption with a neural network function approximator, while retaining LinUCB’s principled upper confidence bound (UCB) exploration strategy.
 
-CNN-UCB addresses this limitation by modeling the expected reward as a **non-linear function of image features** extracted by a Convolutional Neural Network (CNN). This enables the agent to make more informed decisions in scenarios like visual recommendation systems, online advertising, or movie thumbnail selection, where the context for each arm is an image.  
+The main challenge is to design an exploration bonus that remains theoretically grounded when the model is nonlinear. NeuralUCB addresses this using a connection between neural networks and kernel methods via the Neural Tangent Kernel (NTK) theory.
 
 ---
 
 ### Core Idea
-CNN-UCB combines a CNN-based feature extractor with an Upper Confidence Bound (UCB) exploration mechanism:
+Let \( f(x; \theta) \) denote a neural network parameterized by weights \( \theta \). The goal is to learn a mapping from context \( x_{t,a} \) to expected reward \( \mathbb{E}[r_{t,a}] \approx f(x_{t,a}; \theta^*) \), where \( \theta^* \) represents the true (unknown) parameters.
 
-1. **CNN for Reward Estimation:**  
-   Each arm’s context \( x_{t,a} \) is an image processed through a CNN \( f(x_{t,a}; \theta_t) \). The network outputs a predicted reward for the arm:
+At each round \( t \), NeuralUCB maintains a parameter estimate \( \hat{\theta}_t \) obtained by minimizing the squared loss on past observations. For each candidate arm \( a \), the algorithm computes an upper confidence bound:
 
-   \[
-   \hat{r}_{t,a} = f(x_{t,a}; \theta_t)
-   \]
+\[
+U_{t,a} = f(x_{t,a}; \hat{\theta}_t) + \alpha \sqrt{g_t(x_{t,a})^\top Z_t^{-1} g_t(x_{t,a})}
+\]
 
-   Here, \( \theta_t \) are the CNN parameters updated online.
-
-2. **Upper Confidence Bound (UCB) Exploration:**  
-   The exploration bonus is derived from the neural tangent kernel (NTK) approximation, similar to NeuralUCB. The UCB for arm \( a \) at time \( t \) is:
-
-   \[
-   U_{t,a} = f(x_{t,a}; \theta_t) + \alpha \sqrt{g(x_{t,a};\theta_t)^\top G_t^{-1} g(x_{t,a};\theta_t)}
-   \]
-
-   where \( g(x_{t,a};\theta_t) = \nabla_\theta f(x_{t,a};\theta_t) \) is the gradient of the network output w.r.t parameters, \( G_t = \sum_{s=1}^{t-1} g(x_{s,a_s};\theta_s) g(x_{s,a_s};\theta_s)^\top + \lambda I \) accumulates past gradients, and \( \alpha \) controls the exploration-exploitation trade-off.
-
-3. **Arm Selection:**  
-   At each round, the algorithm selects the arm with the highest UCB:
-
-   \[
-   a_t = \arg\max_a U_{t,a}
-   \]
-
-4. **Parameter Update:**  
-   After observing the reward \( r_t \), the CNN parameters are updated using stochastic gradient descent to minimize the squared error between predicted and observed reward.
+where \( Z_t \) represents a regularized approximation of the local curvature of the network’s output with respect to its parameters. This term captures how uncertain the model is about the output for the given context.
 
 ---
 
-### Why This Matters
-CNN-UCB bridges **linear contextual bandits (LinUCB)** and **non-linear neural bandits (NeuralUCB)** for **visual contexts**:
+### Why the Exploration Term Works
+In linear models, uncertainty is directly tied to the covariance matrix of the feature vectors. In NeuralUCB, the feature space is implicitly defined by the gradients of the network output with respect to its parameters. Specifically, the gradient
 
-- Linear methods fail on high-dimensional image inputs.
-- NeuralUCB provides a principled exploration term via NTK but was not specifically applied to convolutional architectures.
-- CNN-UCB leverages the **structured feature extraction of CNNs** while preserving NTK-style UCB exploration, making it a practical and theoretically grounded method for image-based bandits.
+\[
+g_t(x) = \nabla_\theta f(x; \hat{\theta}_t)
+\]
 
-By explicitly modeling uncertainty via the gradient covariance \( G_t \), CNN-UCB can efficiently explore untried arms while exploiting promising visual contexts.
+serves as a nonlinear feature representation of the context. The uncertainty in the prediction for arm \( a \) can then be expressed as
+
+\[
+\sqrt{g_t(x_{t,a})^\top Z_t^{-1} g_t(x_{t,a})}
+\]
+
+This measures how sensitive the model’s prediction is to small parameter changes. If the gradient has high magnitude in directions where the model is poorly constrained, it implies high uncertainty. The exploration bonus therefore encourages sampling arms with high model uncertainty, ensuring that the algorithm explores novel or underrepresented contexts.
+
+Intuitively, NeuralUCB treats the neural network as a locally linear function around its current parameters. The uncertainty term estimates how far the current function might deviate from the true reward in that local neighborhood.
 
 ---
 
-### Algorithmic Contributions
-1. **CNN-Based Reward Function:** Captures complex, non-linear relationships between images and rewards.  
-2. **Gradient-Based UCB Exploration:** Uses the NTK-inspired term to balance exploration and exploitation, extending NeuralUCB to convolutional architectures.  
-3. **Regret Analysis:** Provides a near-optimal regret bound \( \tilde{O}(\sqrt{T}) \) under over-parameterized CNN assumptions, offering theoretical guarantees for non-linear visual bandits.  
-4. **Connection to CNTK:** The authors show that the dynamic convolutional NTK behaves similarly to the initialization kernel during training, validating the exploration bonus.
+### The Neural Tangent Kernel (NTK) Approximation
+The NTK provides a way to relate a neural network’s predictions to an equivalent kernel regression model. Under certain assumptions (wide networks, small learning rates, and smooth activations), the evolution of the neural network during training can be approximated by a kernel method with kernel
+
+\[
+K(x, x') = \nabla_\theta f(x; \theta_0)^\top \nabla_\theta f(x'; \theta_0)
+\]
+
+where \( \theta_0 \) is the network’s initialization.
+
+NeuralUCB leverages this idea by treating the gradient vectors \( g_t(x) \) as implicit features governed by the NTK. The confidence term based on \( Z_t^{-1} \) therefore acts as an estimate of the uncertainty in the kernel regression approximation. This connection allows the use of UCB principles in nonlinear neural models while retaining theoretical regret guarantees.
+
+---
+
+### Algorithm Summary
+1. Initialize network parameters \( \theta_0 \) and regularization constant \( \lambda > 0 \).  
+2. Initialize matrix \( Z_0 = \lambda I \).  
+3. For each round \( t = 1, 2, \ldots, T \):  
+   - Compute the current gradient features \( g_t(x_{t,a}) = \nabla_\theta f(x_{t,a}; \hat{\theta}_t) \) for all arms \( a \).  
+   - For each arm, calculate  
+     \[
+     U_{t,a} = f(x_{t,a}; \hat{\theta}_t) + \alpha \sqrt{g_t(x_{t,a})^\top Z_t^{-1} g_t(x_{t,a})}
+     \]
+   - Select \( a_t = \arg\max_a U_{t,a} \).  
+   - Observe reward \( r_t \).  
+   - Update the matrix and network parameters:  
+     \[
+     Z_{t+1} = Z_t + g_t(x_{t,a_t}) g_t(x_{t,a_t})^\top
+     \]
+     \[
+     \hat{\theta}_{t+1} = \text{TrainNN}(\hat{\theta}_t, \{x_{s,a_s}, r_s\}_{s=1}^t)
+     \]
+     
+---
+
+### Key Contributions
+- Extends LinUCB to nonlinear models by integrating deep neural networks with UCB-based exploration.  
+- Introduces a theoretically justified confidence term derived from NTK analysis.  
+- Provides regret bounds of order \( \tilde{O}(d \sqrt{T}) \) under suitable regularity conditions.  
 
 ---
 
 ### Strengths
-- **Empirical Performance:** Outperforms traditional linear bandits and heuristic exploration strategies on real-world visual datasets.  
-- **Theoretical Guarantees:** Provides provable regret bounds, extending NeuralUCB theory to CNNs.  
-- **Adaptability:** Can handle high-dimensional visual contexts and non-linear reward functions.  
+- Captures nonlinear reward structures beyond linear models.  
+- Maintains a clear exploration-exploitation balance through UCB principles.  
+- Retains theoretical regret guarantees under mild smoothness assumptions.  
 
 ---
 
 ### Limitations
-- **Over-Parameterization Assumption:** The theoretical guarantees assume CNNs are sufficiently wide, which may not hold for smaller networks.  
-- **Computational Complexity:** Maintaining \( G_t \) and computing gradient-based UCBs can be memory- and compute-intensive.  
-- **Scalability:** Online updates for very deep CNNs or large datasets may require approximations or batching strategies.  
+- Requires gradient computation for each arm at every step, increasing computational cost.  
+- Theoretical assumptions rely on wide-network approximations, which may not hold in practice.  
 
 ---
 
 ### Relevance to ViT-UCB
-CNN-UCB provides a blueprint for extending **NeuralUCB to high-dimensional, non-linear contexts**. For ViT-UCB:  
-
-- Replace CNN with a **Vision Transformer (ViT)** to capture global image features via self-attention.  
-- Use gradient-based NTK terms for the UCB exploration bonus, similar to NeuralUCB/CNN-UCB.  
-- Pretrained ViTs can be frozen or adapted with LoRA to improve sample efficiency while maintaining exploration guarantees.  
-- The theoretical connection to NTK justifies using gradients of the ViT embeddings in computing exploration bonuses.
-
----
-
-This version now ties the CNN-UCB method explicitly to LinUCB, NeuralUCB, NTK theory, and your eventual ViT-UCB project, maintaining the style of your previous literature reviews.
+NeuralUCB provides the conceptual bridge between classical linear contextual bandits and non-linear contextual bandits. It shows that even when there is no clear relation between the context and reward, agent is still able to utilize the context effectively
