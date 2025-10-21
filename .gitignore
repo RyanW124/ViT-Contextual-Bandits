@@ -2,3 +2,5 @@
 results
 temp
 __pycache__
+dataset
+*.pkl
