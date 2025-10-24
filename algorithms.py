@@ -9,6 +9,11 @@ from environment import ImageBanditEnv
 from tqdm.auto import tqdm
 from peft import LoraConfig, get_peft_model, TaskType
 from transformers import ViTForImageClassification, AutoConfig
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+from torchvision import transforms
 # -----------------
 # Base Algorithm
 # -----------------
@@ -49,7 +54,7 @@ class BanditAlgo:
         self.cum_reward_graph.append(self.cum_reward)
         self.regret += self.env.best_mu - self.env.arms[arm].mu
         self.regret_graph.append(self.regret)
-        self.loss_graph.append(F.mse_loss(torch.from_numpy(preds), torch.tensor([arm.mu for arm in self.env.arms])))
+        self.loss_graph.append(F.mse_loss(torch.from_numpy(preds).view(-1), torch.tensor([arm.mu for arm in self.env.arms])).view(-1))
         return reward
 
     def run(self, n_steps=1):
@@ -96,19 +101,21 @@ class EGreedy(BanditAlgo):
 # LinUCB (on ViT embeddings)
 # -----------------
 class LinUCB(BanditAlgo):
-    def __init__(self, n_arms, alpha=1.0, model_name="google/vit-base-patch16-224"):
-        super().__init__(n_arms)
+    transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor()
+        ])
+    def __init__(self, env, alpha=1.0, model_name="WinKawaks/vit-tiny-patch16-224"):
+        super().__init__(env)
+        self.env = env
         self.alpha = alpha
         self.vit = ViTModel.from_pretrained(model_name)
         self.embed_dim = self.vit.config.hidden_size
 
-        self.A = [np.identity(self.embed_dim) for _ in range(n_arms)]
-        self.b = [np.zeros((self.embed_dim, 1)) for _ in range(n_arms)]
+        self.A = [np.identity(self.embed_dim) for _ in range(self.env.n)]
+        self.b = [np.zeros((self.embed_dim, 1)) for _ in range(self.env.n)]
 
-        self.preprocess = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor()
-        ])
+        
 
     def get_embedding(self, img):
         with torch.no_grad():
@@ -118,18 +125,26 @@ class LinUCB(BanditAlgo):
             emb = outputs.last_hidden_state[:, 0, :]  # CLS token
         return emb.squeeze(0).numpy()
 
-    def select_arm(self, contexts):
+    def select_arm(self):
+        contexts = [self.transform(i) for i in self.env.get_contexts()]
         vals = []
+        preds = np.zeros(self.n_arms)
+        bonuses = np.zeros(self.n_arms)
         for a, img in enumerate(contexts):
             x = self.get_embedding(img).reshape(-1, 1)
             A_inv = np.linalg.inv(self.A[a])
             theta = A_inv @ self.b[a]
-            p = float(theta.T @ x + self.alpha * np.sqrt(x.T @ A_inv @ x))
+            pred = theta.T @ x
+            bonus = self.alpha * np.sqrt(x.T @ A_inv @ x)
+            p = float(pred + bonus)
+            preds[a] = pred
+            bonuses[a] = bonus
             vals.append(p)
-        return int(np.argmax(vals))
+        arm = np.argmax(vals)
+        self.update(arm, bonuses, preds, contexts[arm])
 
-    def update(self, arm, reward, context):
-        super().update(arm, reward, context)
+    def update(self, arm, bonus, preds, context):
+        reward = super().update(arm, bonus, preds)
         x = self.get_embedding(context).reshape(-1, 1)
         self.A[arm] += x @ x.T
         self.b[arm] += reward * x
@@ -138,21 +153,17 @@ class LinUCB(BanditAlgo):
 # -----------------
 # CNN-UCB
 # -----------------
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-from torchvision import transforms
+
 
 
 
 class CNNRewardNet(nn.Module):
     def __init__(self, input_channels=3):
         super().__init__()
-        self.conv1 = nn.Conv2d(input_channels, 8, 3, padding=1)
-        self.conv2 = nn.Conv2d(8, 16, 3, padding=1)
+        self.conv1 = nn.Conv2d(input_channels, 32, 3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
         self.pool = nn.MaxPool2d(2, 2)
-        self.fc = nn.Linear(2304, 1)
+        self.fc = nn.Linear(9216, 1)
     
     def forward(self, x):
         x = F.relu(self.conv1(x))
@@ -275,9 +286,9 @@ class CNN_UCB(BanditAlgo):
     def train(self):
         x, y = self.replay.sample(64)
         x = torch.tensor(x, dtype=torch.float32).to(self.device)
-        y = torch.tensor(y, dtype=torch.float32).to(self.device).view(-1,1)
+        y = torch.tensor(y, dtype=torch.float32).to(self.device)
         y_hat = self.model(x)
-        loss = F.mse_loss(y_hat.view(-1,1), y)
+        loss = F.mse_loss(y_hat.view(-1), y.view(-1))
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -298,7 +309,7 @@ from PIL import Image
 
 
 class ViTRewardModel(nn.Module):
-    def __init__(self, model_name="google/vit-tiny-patch16-224", device="cuda",
+    def __init__(self, model_name="WinKawaks/vit-tiny-patch16-224", device="cuda",
                  lora_r=8, lora_alpha=16, lora_dropout=0.0):
         super().__init__()
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
@@ -374,12 +385,12 @@ class ViTRewardModel(nn.Module):
         for name, p in self.vit.named_parameters():
             if "lora_" in name and "encoder.layer.11" in name and p.requires_grad:
                 params.append(p)
-        for i in params:
-            print(len(i))
-        print()
+        # for i in params:
+        #     print(i.shape)
+        # print()
         # Add MLP head params
         params += [p for p in self.mlp_head.parameters() if p.requires_grad]
-        print( [p for p in self.mlp_head.parameters() if p.requires_grad])
+        # print( [p for p in self.mlp_head.parameters() if p.requires_grad])
         return params
 
 
