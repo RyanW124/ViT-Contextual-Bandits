@@ -1,6 +1,6 @@
 # ViT Contextual Bandits
 
-A research project exploring the integration of Vision Transformers (ViT) with Upper Confidence Bound (UCB) algorithms for contextual image-based bandit learning. The project finetunes a ViT using LoRA as rewards estimate and leverages neural tangent kernels as exploration bonus. In a nutshell, the UCB score is calculated as \[UCB_{t, a}=ViT(x_{t, a};\theta_t)+\alpha\sqrt{g(x_{t,a};\theta_t)^\top G_t^{-1} g(x_{t,a};\theta_t)}\]
+A research project exploring the integration of Vision Transformers (ViT) with Upper Confidence Bound (UCB) algorithms for contextual image-based bandit learning. The project finetunes a ViT using LoRA as rewards estimate and leverages neural tangent kernels as exploration bonus. In a nutshell, the UCB score is calculated as $$UCB_{t, a}=ViT(x_{t, a};\theta_t)+\alpha\sqrt{g(x_{t,a};\theta_t)^\top G_t^{-1} g(x_{t,a};\theta_t)}$$
 
 ## 📋 Overview
 
