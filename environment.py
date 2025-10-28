@@ -66,6 +66,7 @@ class ImageBanditEnv:
                     data.append(line)
         self.n = n
         self.image_path = Path(temp)
+        self.image_path.mkdir(exist_ok=True)
         data.sort(key=lambda x: x['score'])
         size=len(data)//n
         chunks = []

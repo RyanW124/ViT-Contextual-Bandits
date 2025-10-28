@@ -102,20 +102,21 @@ class EGreedy(BanditAlgo):
 # -----------------
 class LinUCB(BanditAlgo):
     transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor()
-        ])
+        transforms.Resize((224, 224)),
+        transforms.ToTensor()
+    ])
+
     def __init__(self, env, alpha=1.0, model_name="WinKawaks/vit-tiny-patch16-224"):
         super().__init__(env)
         self.env = env
         self.alpha = alpha
         self.vit = ViTModel.from_pretrained(model_name)
         self.embed_dim = self.vit.config.hidden_size
+        self.name = 'linucb'
 
-        self.A = [np.identity(self.embed_dim) for _ in range(self.env.n)]
-        self.b = [np.zeros((self.embed_dim, 1)) for _ in range(self.env.n)]
-
-        
+        # Single universal A and b across all arms
+        self.A = np.identity(self.embed_dim)
+        self.b = np.zeros((self.embed_dim, 1))
 
     def get_embedding(self, img):
         with torch.no_grad():
@@ -125,29 +126,44 @@ class LinUCB(BanditAlgo):
             emb = outputs.last_hidden_state[:, 0, :]  # CLS token
         return emb.squeeze(0).numpy()
 
-    def select_arm(self):
+    def predict(self, contexts):
         contexts = [self.transform(i) for i in self.env.get_contexts()]
-        vals = []
-        preds = np.zeros(self.n_arms)
-        bonuses = np.zeros(self.n_arms)
+        A_inv = np.linalg.inv(self.A)
+        theta = A_inv @ self.b
+
+        preds = np.zeros(self.env.n)
         for a, img in enumerate(contexts):
             x = self.get_embedding(img).reshape(-1, 1)
-            A_inv = np.linalg.inv(self.A[a])
-            theta = A_inv @ self.b[a]
-            pred = theta.T @ x
+            pred = float(theta.T @ x)
+            preds[a] = pred
+        return preds
+
+    def select_arm(self):
+        contexts = [self.transform(i) for i in self.env.get_contexts()]
+        A_inv = np.linalg.inv(self.A)
+        theta = A_inv @ self.b
+
+        vals = np.zeros(self.env.n)
+        preds = np.zeros(self.env.n)
+        bonuses = np.zeros(self.env.n)
+
+        for a, img in enumerate(contexts):
+            x = self.get_embedding(img).reshape(-1, 1)
+            pred = float(theta.T @ x)
             bonus = self.alpha * np.sqrt(x.T @ A_inv @ x)
-            p = float(pred + bonus)
+            vals[a] = pred + bonus
             preds[a] = pred
             bonuses[a] = bonus
-            vals.append(p)
-        arm = np.argmax(vals)
-        self.update(arm, bonuses, preds, contexts[arm])
 
-    def update(self, arm, bonus, preds, context):
-        reward = super().update(arm, bonus, preds)
+        arm = int(np.argmax(vals))
+        self.update(arm, bonuses, preds, contexts[arm])
+        return arm
+
+    def update(self, arm, bonuses, preds, context):
+        reward = super().update(arm, bonuses, preds)
         x = self.get_embedding(context).reshape(-1, 1)
-        self.A[arm] += x @ x.T
-        self.b[arm] += reward * x
+        self.A += x @ x.T
+        self.b += reward * x
 
 
 # -----------------
@@ -324,10 +340,6 @@ class ViTRewardModel(nn.Module):
             model_name, config=config
         )
 
-        # Freeze base params
-        for p in self.vit.parameters():
-            p.requires_grad = False
-
         # Inject LoRA
         lora_config = LoraConfig(
             r=lora_r,
@@ -343,10 +355,6 @@ class ViTRewardModel(nn.Module):
         self.mlp_head = nn.Sequential(
             nn.Linear(1000, 1)
         )
-
-        # Make sure MLP is trainable
-        for p in self.mlp_head.parameters():
-            p.requires_grad = True
 
         self.to(self.device)
 
@@ -439,7 +447,7 @@ class ViT_UCB(BanditAlgo):
         self.vit = ViTRewardModel(model_name=model_name, device=self.device,
                           lora_r=lora_r, lora_alpha=lora_alpha, lora_dropout=lora_dropout)
         # replay buffer shape matches (C,H,W)
-        self.replay = ReplayBufferFIFO((3, 224, 224), capacity=10)
+        self.replay = ReplayBufferFIFO((3, 224, 224), capacity=50)
         # self.replay = ReplayBuffer((3, 224, 224), capacity=1000)
         # optimizer only for trainable params (LoRA + classifier head)
         self.optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.vit.parameters()), lr=1e-4)
