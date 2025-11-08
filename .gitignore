@@ -2,5 +2,9 @@
 results
 temp
 __pycache__
-dataset
+mnist dataset
 *.pkl
+*.sqlite3
+*.jsonl
+**/.ipynb_checkpoints/
+

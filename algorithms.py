@@ -215,22 +215,24 @@ class CNN_UCB(BanditAlgo):
         transforms.Resize((50, 50)),   # resize to model input
         transforms.ToTensor()
     ])
-    def __init__(self, env, alpha=1.0, lambda_reg=1.0):
+    def __init__(self, env, alpha=1.0, lambda_reg=1.0, model=CNNRewardNet, name="cnnucb"):
         super().__init__(env)
-        self.name = "cnnucb"
-        self.device = "cuda"
+        self.name = name
+        self.device = torch.device("cuda")
         self.alpha = alpha
         self.lambda_reg = lambda_reg
         self.env = env
         self.replay = ReplayBufferFIFO((3, 50, 50), 10)
-        model = CNNRewardNet()
+        model = model()
         self.model = model.to(self.device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-3)
         # Store gradient vectors for low-rank covariance approximation
         self.grad_list = []
         self.m=10
         self.numel = sum(w.numel() for w in self.model.parameters() if w.requires_grad)
-        self.sigma_inv = lambda_reg * np.eye(self.numel, dtype=np.float32)
+        # self.sigma_inv = lambda_reg * np.eye(self.numel, dtype=np.float32)
+        self.sigma_inv = (self.lambda_reg * torch.eye(self.numel, dtype=torch.float32, device=self.device))
+        
     def _preprocess_pil_list(self, contexts):
         tensors = []
         for ctx in contexts:
@@ -249,17 +251,21 @@ class CNN_UCB(BanditAlgo):
         for param in self.model.parameters():
             grad_list.append(param.grad.view(-1))
         grad_vector = torch.cat(grad_list).detach()  # flattened vector
-        return grad_vector.cpu().numpy()
+        return grad_vector
     
     def select_arm(self):
         ucb_scores = []
-        g = np.zeros((self.env.n, self.numel), dtype=np.float32)
+        g = torch.zeros((self.env.n, self.numel), dtype=torch.float32, device=self.device)
         contexts = self.env.get_contexts()
         for i, img in enumerate(contexts):
-            g[i] = self.grad(self.transform(img).cuda()).cpu().numpy()
+            g[i] = self.grad(self.transform(img).cuda())
         with torch.no_grad():
-            bonus =  self.alpha * np.sqrt(np.matmul(np.matmul(g[:, None, :], self.sigma_inv), g[:, :, None])[:, 0, :])
-            preds = self.model(self._preprocess_pil_list(contexts)).cpu().numpy()
+            vals = torch.einsum('bi,ij,bj->b', g, self.sigma_inv, g)  # shape: (n_arms,)
+            
+            # Ensure non-negative and compute bonuses
+            bonus = self.alpha * torch.sqrt(torch.clamp(vals, min=0.0)).cpu().numpy().flatten()
+            # bonus =  self.alpha * np.sqrt(np.matmul(np.matmul(g[:, None, :], self.sigma_inv), g[:, :, None])[:, 0, :])
+            preds = self.model(self._preprocess_pil_list(contexts)).cpu().numpy().flatten()
             ucb_scores =  preds +bonus
                 # Compute exploration bonus using stored gradients
                 # if len(self.grad_list) == 0:
@@ -273,6 +279,7 @@ class CNN_UCB(BanditAlgo):
                 
                 # ucb_scores.append(pred + bonus)
         arm = int(np.argmax(ucb_scores))
+        # print(arm, bonus, preds)
         self.update(arm, bonus, contexts[arm], preds)
     def grad(self, x):
         if len(x.shape)<4:
@@ -296,7 +303,7 @@ class CNN_UCB(BanditAlgo):
         # self.optimizer.step()
         
         # store gradient for UCB (faithful to paper)
-        self.sherman_morrison_update(self.grad(image).cpu().numpy()[:, None])
+        self.sherman_morrison_update(self.grad(image)[:, None])
         self.replay.add(image.cpu().numpy(), reward)
         self.train()
     def train(self):
@@ -431,7 +438,7 @@ class ViT_UCB(BanditAlgo):
                  lora_r=8, lora_alpha=16, lora_dropout=0.0, device="cuda"):
         super().__init__(env)
         self.name = "vit_ucb"
-        self.device = device if torch.cuda.is_available() else "cpu"
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.alpha = float(alpha)
         self.lambda_reg = float(lambda_reg)
         self.env = env
@@ -460,13 +467,19 @@ class ViT_UCB(BanditAlgo):
         self.trainable_params = self.vit.get_trainable_params()
         self.numel = sum(p.numel() for p in self.trainable_params)
         # initialize inverse covariance as lambda * I (numpy)
-        self.sigma_inv = (self.lambda_reg * np.eye(self.numel, dtype=np.float64))
-
+        # self.sigma_inv = (self.lambda_reg * np.eye(self.numel, dtype=np.float64))
+        
+        self.init_A()
         # number used for gradient normalization (NTK scaling)
         self.m = max(1, int(self.numel))  # fallback
         # cache device tensor for ones used in backward
         self._ones_cache = None
-    
+    def offload_A(self):
+        self.sigma_inv.detach().cpu()
+        del self.sigma_inv
+        self.sigma_inv = None
+    def init_A(self):
+        self.sigma_inv = (self.lambda_reg * torch.eye(self.numel, dtype=torch.float32, device=self.device))
     def _grad_vector_for_tensor(self, x_tensor):
         """
         Compute flattened gradient vector (numpy) of the model output w.r.t. trainable params for a single input.
@@ -495,7 +508,8 @@ class ViT_UCB(BanditAlgo):
         grad_vector = torch.cat(grads)
         # optional NTK scaling (paper uses 1/sqrt(m))
         grad_vector = grad_vector / np.sqrt(self.m)
-        return grad_vector.cpu().numpy().astype(np.float64)
+        return grad_vector
+        # return grad_vector.cpu().numpy().astype(np.float64)
     def _preprocess_pil_list(self, contexts):
         tensors = []
         for ctx in contexts:
@@ -508,24 +522,47 @@ class ViT_UCB(BanditAlgo):
         # contexts: list of PIL images or tensors
         batch = self._preprocess_pil_list(contexts)
         preds = self.vit.predict(batch).view(-1)  # returns torch tensor (B,)
+        # return preds
         return preds.numpy().astype(np.float64)
 
-    def sherman_morrison_update(self, v):
-        # v: column vector shape (numel, 1) (numpy)
-        v = v.reshape(-1, 1)
-        s = float((v.T @ self.sigma_inv @ v).item())
+    # def sherman_morrison_update(self, v):
+    #     # v: column vector shape (numel, 1) (numpy)
+    #     v = v.reshape(-1, 1)
+    #     s = float((v.T @ self.sigma_inv @ v).item())
+    #     denom = 1.0 + s
+    #     if denom <= 1e-12:
+    #         denom = 1e-12
+    #     self.sigma_inv = self.sigma_inv - (self.sigma_inv @ v @ v.T @ self.sigma_inv) / denom
+    #     # keep symmetric
+    #     self.sigma_inv = 0.5 * (self.sigma_inv + self.sigma_inv.T)
+    @torch.no_grad()
+    def sherman_morrison_update(self, v: torch.Tensor):
+        """
+        Sherman–Morrison rank-1 inverse update in PyTorch.
+        Args:
+            v: column vector of shape (numel, 1), on same device as self.sigma_inv
+        """
+        if v.dim() == 1:
+            v = v.view(-1, 1)
+    
+        # Compute scalar s = vᵀ Σ⁻¹ v
+        s = (v.T @ self.sigma_inv @ v).item()
         denom = 1.0 + s
         if denom <= 1e-12:
             denom = 1e-12
-        self.sigma_inv = self.sigma_inv - (self.sigma_inv @ v @ v.T @ self.sigma_inv) / denom
-        # keep symmetric
+    
+        # Update inverse covariance
+        self.sigma_inv -= (self.sigma_inv @ v @ v.T @ self.sigma_inv) / denom
+    
+        # Keep symmetric for numerical stability
         self.sigma_inv = 0.5 * (self.sigma_inv + self.sigma_inv.T)
+
 
     def select_arm(self):
         # get contexts (PIL images) from env
         contexts = self.env.get_contexts()  # should return list length n_arms
         # compute grad vectors for each arm (could be expensive; we do one backward per arm)
-        grads = np.zeros((self.n_arms, self.numel), dtype=np.float64)
+        grads = torch.zeros((self.n_arms, self.numel), dtype=torch.float32, device=self.device)
         for i, img in enumerate(contexts):
             # # preprocess single
             if isinstance(img, Image.Image):
@@ -537,11 +574,15 @@ class ViT_UCB(BanditAlgo):
 
         # compute bonuses: alpha * sqrt(g^T Sigma_inv g)
         bonuses = np.zeros((self.n_arms,), dtype=np.float64)
-        for i in range(self.n_arms):
-            gi = grads[i].reshape(-1, 1)
-            val = float((gi.T @ self.sigma_inv @ gi).item())
-            bonuses[i] = self.alpha * np.sqrt(max(val, 0.0))
-
+        # for i in range(self.n_arms):
+        #     gi = grads[i].reshape(-1, 1)
+        #     val = float((gi.T @ self.sigma_inv @ gi).item())
+        #     bonuses[i] = self.alpha * np.sqrt(max(val, 0.0))
+        vals = torch.einsum('bi,ij,bj->b', grads, self.sigma_inv, grads)  # shape: (n_arms,)
+        
+        # Ensure non-negative and compute bonuses
+        bonuses = self.alpha * torch.sqrt(torch.clamp(vals, min=0.0))
+        bonuses = bonuses.cpu().numpy()
         # compute predicted rewards in batch (no grad)
         preds = self._batch_preds(contexts)  # shape (n_arms,)
         ucb_scores = preds + bonuses

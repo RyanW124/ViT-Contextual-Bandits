@@ -1,5 +1,6 @@
 import numpy as np
 import json
+from scipy.ndimage import gaussian_filter1d
 from PIL import Image, ImageOps
 import requests, random, os
 from pathlib import Path
@@ -122,20 +123,30 @@ class Experiment:
         self.agents = agents
         self.env = env
 
-    def generate_results(self):
+    def generate_results(self, smooth=0):
+        self.results.mkdir(exist_ok=True)
         for agent in self.agents:
             plt.plot(agent.cum_reward_graph, label=agent.name)
         plt.legend()
-        plt.savefig(self.results.joinpath("Cum_Reward.png"))
+        plt.title("Cumulative Reward Over Time")
+        plt.ylabel("Cumulative Reward")
+        plt.xlabel("Time Step")
+        plt.savefig(self.results.joinpath("Cumulative_Reward.png"))
         plt.close()
         for agent in self.agents:
             plt.plot(agent.regret_graph, label=agent.name)
         plt.legend()
-        plt.savefig(self.results.joinpath("Regret.png"))
+        plt.title("Cumulative Regret Over Time")
+        plt.ylabel("Cumulative Regret")
+        plt.xlabel("Time Step")
+        plt.savefig(self.results.joinpath("Cumulative_Regret.png"))
         plt.close()
         for agent in self.agents:
             plt.plot(agent.loss_graph, label=agent.name)
         plt.legend()
+        plt.title("Loss Over Time")
+        plt.ylabel("MSE")
+        plt.xlabel("Time Step")
         plt.savefig(self.results.joinpath("Loss.png"))
         plt.close()
 
@@ -143,7 +154,7 @@ class Experiment:
         for agent in self.agents:
             if not agent.detailed:
                 continue
-            fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+            fig, axes = plt.subplots(1, 3, figsize=(10, 4))
             counts = np.array(agent.count_graph).T
             for i, arr in enumerate(counts):
                 axes[0].plot(arr, label=f'Arm {i}')
@@ -151,11 +162,23 @@ class Experiment:
             axes[0].legend()
 
             # Right plot
-            bonus = np.array(agent.bonus_graph).T
+            bonus = np.array(agent.bonus_graph)
+            n = self.env.n
+            normed = (bonus-np.repeat((np.sum(bonus, axis=1)/n)[:, None], n, axis=1)).T
+            
+            bonus = bonus.T
             for i, arr in enumerate(bonus):
-                axes[1].plot(arr, label=f'Arm {i}')
+                p = gaussian_filter1d(arr, sigma=smooth) if smooth else arr
+                axes[1].plot(p, label=f'Arm {i}')
+                arr2 = normed[i]
+                p =gaussian_filter1d(arr2, sigma=smooth) if smooth else arr
+                axes[2].plot(p, label=f'Arm {i}')
+                
             axes[1].set_title('UCB Bonus')
             axes[1].legend()
+            axes[2].set_title('UCB Bonus 0-Centered')
+            axes[2].legend()
+            fig.suptitle(f"{agent.name} Details")
             plt.tight_layout()
             plt.savefig(self.results.joinpath(f"{agent.name}_detail.png"))
             plt.close()
