@@ -15,38 +15,38 @@ NeuralUCB extended linear bandits by using fully-connected neural networks to mo
 CNN-UCB can be understood as NeuralUCB specialized for images. It replaces the fully-connected network with a CNN to extract spatially-aware features from images while retaining the NTK-inspired exploration mechanism.
 
 1. CNN Reward Estimation:  
-   Each arm’s image context \(x_{t,a}\) is processed through a CNN:
+   Each arm’s image context $x_{t,a}$ is processed through a CNN:
 
-   \[
+   $$
    \hat{r}_{t,a} = f(x_{t,a}; \theta_t) = \text{CNN}(x_{t,a}; \theta_t)
-   \]
+   $$
 
-   where \(\theta_t\) are the network parameters updated online.
+   where $\theta_t$ are the network parameters updated online.
 
 2. Gradient-Based UCB Exploration:  
-   Similar to NeuralUCB, the UCB for arm \(a\) at time \(t\) is:
+   Similar to NeuralUCB, the UCB for arm $a$ at time $t$ is:
 
-   \[
+   $$
    U_{t,a} = f(x_{t,a}; \theta_t) + \alpha \sqrt{g(x_{t,a};\theta_t)^\top G_t^{-1} g(x_{t,a};\theta_t)}
-   \]
+   $$
 
-   with \(g(x_{t,a};\theta_t) = \nabla_\theta f(x_{t,a}; \theta_t)\) and
+   with $g(x_{t,a};\theta_t) = \nabla_\theta f(x_{t,a}; \theta_t)$ and
 
-   \[
+   $$
    G_{t+1} = G_t + \sum_{s=1}^{t-1} g(x_{s,a_s}; \theta_s) g(x_{s,a_s}; \theta_s)^\top
-   \]
+   $$
 
    The exploration term captures the uncertainty of the model in unvisited regions of the context space, analogous to NeuralUCB but now applied to high-dimensional visual features.
 
 3. Arm Selection:  
    At each round, select the arm with the highest UCB:
 
-   \[
+   $$
    a_t = \arg\max_a U_{t,a}
-   \]
+   $$
 
 4. Parameter Update:  
-   After observing reward \(r_t\), update CNN parameters \(\theta_t\) using gradient descent to minimize the squared error between predicted and observed rewards.
+   After observing reward $r_t$, update CNN parameters $\theta_t$ using gradient descent to minimize the squared error between predicted and observed rewards.
 
 ---
 

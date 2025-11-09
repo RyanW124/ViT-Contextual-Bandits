@@ -10,19 +10,19 @@ The Neural Tangent Kernel (NTK) paper addresses the fundamental question: why do
 ---
 
 ### Core Idea
-Consider a neural network \( f(x; \theta) \) with parameters \( \theta \). During gradient descent, the function update can be expressed as:
+Consider a neural network $ f(x; \theta) $ with parameters $ \theta $. During gradient descent, the function update can be expressed as:
 
-\[
+$$
 \frac{df(x)}{dt} = -\eta \nabla_\theta f(x) \cdot \nabla_\theta \mathcal{L}(\theta)
-\]
+$$
 
-where \( \eta \) is the learning rate and \( \mathcal{L} \) is the loss function. By linearizing the network around its initialization \( \theta_0 \) and taking the infinite-width limit, the dynamics reduce to a linear system governed by the Neural Tangent Kernel:
+where $ \eta $ is the learning rate and $ \mathcal{L} $ is the loss function. By linearizing the network around its initialization $ \theta_0 $ and taking the infinite-width limit, the dynamics reduce to a linear system governed by the Neural Tangent Kernel:
 
-\[
+$$
 \Theta(x, x') = \nabla_\theta f(x; \theta_0)^\top \nabla_\theta f(x'; \theta_0)
-\]
+$$
 
-Here, \( \Theta \) is the NTK, and it remains approximately constant during training. The network’s function evolution then becomes a kernel regression problem in function space.
+Here, $ \Theta $ is the NTK, and it remains approximately constant during training. The network’s function evolution then becomes a kernel regression problem in function space.
 
 
 ### Relevance to ViT-UCB

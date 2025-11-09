@@ -12,17 +12,17 @@ While NeuralUCB (Zhou et al., 2020) addresses exploration through deterministic 
 ---
 
 ### Core Idea  
-NeuralTS maintains a posterior over the neural network’s predicted reward function using the NTK features. The mean of this posterior is the current network prediction \( f(x; \theta_t) \), and its covariance is derived from gradients with respect to network parameters:
-\[
+NeuralTS maintains a posterior over the neural network’s predicted reward function using the NTK features. The mean of this posterior is the current network prediction $ f(x; \theta_t) $, and its covariance is derived from gradients with respect to network parameters:
+$$
 g(x; \theta_t) = \nabla_\theta f(x; \theta_t),
-\]
+$$
 and the covariance matrix:
-\[
+$$
 \Sigma_t = \lambda I + \sum_{s=1}^{t-1} g(x_s; \theta_s) g(x_s; \theta_s)^\top.
-\]
+$$
 At each time step, the algorithm samples a function from this posterior by drawing a parameter vector perturbation consistent with the NTK covariance. The agent then chooses the arm with the highest predicted reward from that sampled function and updates both the posterior and network parameters based on the observed reward.
 
-This framework leads to a regret bound of order \( \tilde{O}(\sqrt{T}) \), comparable to NeuralUCB, though obtained via Bayesian analysis rather than deterministic concentration inequalities.
+This framework leads to a regret bound of order $ \tilde{O}(\sqrt{T}) $, comparable to NeuralUCB, though obtained via Bayesian analysis rather than deterministic concentration inequalities.
 
 ---
 
@@ -30,16 +30,16 @@ This framework leads to a regret bound of order \( \tilde{O}(\sqrt{T}) \), compa
 The primary difference between NeuralTS and NeuralUCB lies in how they handle exploration:
 
 - NeuralUCB defines an exploration bonus using an upper confidence bound:
-  \[
+  $$
   U_t(x) = f(x; \theta_t) + \alpha \sqrt{g(x; \theta_t)^\top \Sigma_t^{-1} g(x; \theta_t)}.
-  \]
+  $$
   This encourages the agent to pick arms with high predicted reward or high uncertainty.
   
-- NeuralTS, instead of adding a fixed exploration bonus, samples a function \( \tilde{f}_t \) from the posterior:
-  \[
+- NeuralTS, instead of adding a fixed exploration bonus, samples a function $ \tilde{f}_t $ from the posterior:
+  $$
   \tilde{f}_t(x) = f(x; \theta_t) + \epsilon_t^\top g(x; \theta_t),
-  \]
-  where \( \epsilon_t \sim \mathcal{N}(0, \Sigma_t^{-1}) \).
+  $$
+  where $ \epsilon_t \sim \mathcal{N}(0, \Sigma_t^{-1}) $.
   Exploration thus emerges naturally from randomization rather than explicit optimism.
 
 This means NeuralUCB explores deterministically by optimism in the face of uncertainty, while NeuralTS explores stochastically by Bayesian sampling. In practice, NeuralTS can yield more diverse exploration across similar contexts, whereas NeuralUCB can be more conservative but stable.

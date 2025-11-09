@@ -14,22 +14,22 @@ For contextual bandits where each arm has a high-dimensional image context, glob
 ### Core Idea
 ViT represents an image as a sequence of non-overlapping patches:
 
-\[
+$$
 x \in \mathbb{R}^{H \times W \times C} \rightarrow \{x_p^1, x_p^2, \dots, x_p^N\}, \quad x_p^i \in \mathbb{R}^{P^2 \cdot C}
-\]
+$$
 
 Each patch is flattened and linearly projected into an embedding. A standard Transformer encoder is applied to the sequence:
 
-\[
+$$
 z_0 = [x_{class}; x_p^1 E; x_p^2 E; \dots; x_p^N E] + E_{pos}
-\]
+$$
 
-\[
+$$
 z_\ell' = \text{MSA}(\text{LN}(z_{\ell-1})) + z_{\ell-1}, \quad
 z_\ell = \text{MLP}(\text{LN}(z_\ell')) + z_\ell'
-\]
+$$
 
-where \(MSA\) is multi-head self-attention, \(E\) is the linear projection, and \(E_{pos}\) adds positional embeddings.
+where $MSA$ is multi-head self-attention, $E$ is the linear projection, and $E_{pos}$ adds positional embeddings.
 
 This structure allows global attention across all patches, capturing dependencies that CNNs may miss due to local convolutions.
 

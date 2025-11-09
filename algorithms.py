@@ -222,7 +222,7 @@ class CNN_UCB(BanditAlgo):
         self.alpha = alpha
         self.lambda_reg = lambda_reg
         self.env = env
-        self.replay = ReplayBufferFIFO((3, 50, 50), 10)
+        self.replay = ReplayBufferFIFO((3, 50, 50), 50)
         model = model()
         self.model = model.to(self.device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-3)
