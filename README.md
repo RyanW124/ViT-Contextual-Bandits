@@ -14,7 +14,8 @@ A research project exploring the integration of Vision Transformers (ViT) with U
 | 2025-10-13 | **Environmemt Setup** | Code for fetching data and bandit environment |
 | 2025-10-21 | **Algorithm Implementations** | Preliminary implementations of baselines (LinUCB, CNNUCB) and ViTUCB  |
 | 2025-10-23 | **Proof of Concept** | Experiment on handwritten digit dataset, demonstrating that ViTUCB is viable. Results found in [prelim results](prelim%20results/) |
-| 2025-10-28 | **Rough Proof of UCB Bound** | Came up with rough proof that $\displaystyle  \left\lvert f^*(\bm{x}) - f_{\text{ViT}}(\bm{x}; \bm{\theta}_{\text{ViT}}, \bm{\theta}_{\text{LoRA}}) \right\rvert \leq \alpha \left\lvert\left\lvert\frac{\bm{g}_{\text{ViT}}(\bm{x}; \bm{\theta}_{\text{LoRA}})}{\sqrt{d_{\text{LoRA}}}}\right\rvert\right\rvert_{\bm{A}_t^{-1}} + \beta$ |
+| 2025-10-28 | **Rough Proof of UCB Bound** | Came up with rough proof that $\lvert f^*(\mathbf{x}) - f_{\text{ViT}}(\mathbf{x}; \boldsymbol{\theta}_{\text{ViT}}, \boldsymbol{\theta}_{\text{LoRA}}) \rvert \le \alpha \left\lVert \frac{\mathbf{g}_{\text{ViT}}(\mathbf{x}; \boldsymbol{\theta}_{\text{LoRA}})}{\sqrt{d_{\text{LoRA}}}} \right\rVert_{\mathbf{A}_t^{-1}} + \beta$
+ |
 | 2025-11-02 | **Hyperparameter Tuning** | Tune hyperparameters of algorithms, using [hyperparameter tune.ipynb](hyperparameter%20tune.ipynb) |
 | 2025-11-05 | **Experiment 1** | Experiment on handwritten digit dataset, with tuned hyperparameters. Results found in [mnist results](mnist%20results/) |
 | 2025-11-08 | **Experiment 2** | Experiment on anime dataset, with tuned hyperparameters. Results found in [anime results](anime%20results/) |
