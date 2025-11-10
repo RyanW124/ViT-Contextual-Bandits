@@ -62,16 +62,16 @@ NeuralUCB leverages this idea by treating the gradient vectors $`g_t(x)`$ as imp
 3. For each round $`t = 1, 2, \ldots, T`$:  
    - Compute the current gradient features $`g_t(x_{t,a}) = \nabla_\theta f(x_{t,a}; \hat{\theta}_t)`$ for all arms $`a`$.  
    - For each arm, calculate  
-     ```math
+```math
 U_{t,a} = f(x_{t,a}; \hat{\theta}_t) + \alpha \sqrt{g_t(x_{t,a})^\top Z_t^{-1} g_t(x_{t,a})}
 ```
    - Select $`a_t = \arg\max_a U_{t,a}`$.  
    - Observe reward $`r_t`$.  
    - Update the matrix and network parameters:  
-     ```math
+```math
 Z_{t+1} = Z_t + g_t(x_{t,a_t}) g_t(x_{t,a_t})^\top
 ```
-     ```math
+```math
 \hat{\theta}_{t+1} = \text{TrainNN}(\hat{\theta}_t, \{x_{s,a_s}, r_s\}_{s=1}^t)
 ```
      

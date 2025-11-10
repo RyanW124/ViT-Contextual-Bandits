@@ -7,4 +7,4 @@ mnist dataset
 *.sqlite3
 *.jsonl
 **/.ipynb_checkpoints/
-
+playground.ipynb

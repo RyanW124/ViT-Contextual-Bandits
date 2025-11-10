@@ -60,7 +60,7 @@ which guarantees that the true expected reward lies within the UCB with high pro
    - Compute $`U_{t,a}`$ as above.  
    - Select the arm $`a_t = \arg\max_a U_{t,a}`$.  
    - Observe reward $`r_t`$ and update:  
-     ```math
+```math
 A_{t+1} = A_t + x_{t,a_t} x_{t,a_t}^\top, \quad b_{t+1} = b_t + r_t x_{t,a_t}
 ```
 

@@ -17,7 +17,7 @@ CNN-UCB can be understood as NeuralUCB specialized for images. It replaces the f
 1. CNN Reward Estimation:  
    Each arm’s image context $`x_{t,a}`$ is processed through a CNN:
 
-   ```math
+```math
 \hat{r}_{t,a} = f(x_{t,a}; \theta_t) = \text{CNN}(x_{t,a}; \theta_t)
 ```
 
@@ -26,13 +26,13 @@ CNN-UCB can be understood as NeuralUCB specialized for images. It replaces the f
 2. Gradient-Based UCB Exploration:  
    Similar to NeuralUCB, the UCB for arm $`a`$ at time $`t`$ is:
 
-   ```math
+```math
 U_{t,a} = f(x_{t,a}; \theta_t) + \alpha \sqrt{g(x_{t,a};\theta_t)^\top G_t^{-1} g(x_{t,a};\theta_t)}
 ```
 
    with $`g(x_{t,a};\theta_t) = \nabla_\theta f(x_{t,a}; \theta_t)`$ and
 
-   ```math
+```math
 G_{t+1} = G_t + \sum_{s=1}^{t-1} g(x_{s,a_s}; \theta_s) g(x_{s,a_s}; \theta_s)^\top
 ```
 
@@ -41,7 +41,7 @@ G_{t+1} = G_t + \sum_{s=1}^{t-1} g(x_{s,a_s}; \theta_s) g(x_{s,a_s}; \theta_s)^\
 3. Arm Selection:  
    At each round, select the arm with the highest UCB:
 
-   ```math
+```math
 a_t = \arg\max_a U_{t,a}
 ```
 

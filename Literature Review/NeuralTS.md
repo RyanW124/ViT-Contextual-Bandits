@@ -30,13 +30,13 @@ This framework leads to a regret bound of order $`\tilde{O}(\sqrt{T})`$, compara
 The primary difference between NeuralTS and NeuralUCB lies in how they handle exploration:
 
 - NeuralUCB defines an exploration bonus using an upper confidence bound:
-  ```math
+```math
 U_t(x) = f(x; \theta_t) + \alpha \sqrt{g(x; \theta_t)^\top \Sigma_t^{-1} g(x; \theta_t)}.
 ```
   This encourages the agent to pick arms with high predicted reward or high uncertainty.
   
 - NeuralTS, instead of adding a fixed exploration bonus, samples a function $`\tilde{f}_t`$ from the posterior:
-  ```math
+```math
 \tilde{f}_t(x) = f(x; \theta_t) + \epsilon_t^\top g(x; \theta_t),
 ```
   where $`\epsilon_t \sim \mathcal{N}(0, \Sigma_t^{-1})`$.
