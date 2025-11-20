@@ -106,8 +106,8 @@ class LinUCB(BanditAlgo):
         transforms.ToTensor()
     ])
 
-    def __init__(self, env, alpha=1.0, model_name="WinKawaks/vit-tiny-patch16-224"):
-        super().__init__(env)
+    def __init__(self, env, alpha=1.0, model_name="WinKawaks/vit-tiny-patch16-224", detailed=True):
+        super().__init__(env, detailed)
         self.env = env
         self.alpha = alpha
         self.vit = ViTModel.from_pretrained(model_name)
@@ -215,8 +215,8 @@ class CNN_UCB(BanditAlgo):
         transforms.Resize((50, 50)),   # resize to model input
         transforms.ToTensor()
     ])
-    def __init__(self, env, alpha=1.0, lambda_reg=1.0, model=CNNRewardNet, name="cnnucb"):
-        super().__init__(env)
+    def __init__(self, env, alpha=1.0, lambda_reg=1.0, model=CNNRewardNet, name="cnnucb", detailed=True):
+        super().__init__(env, detailed)
         self.name = name
         self.device = torch.device("cuda")
         self.alpha = alpha
@@ -435,8 +435,8 @@ class ReplayBufferFIFO:
 # ViT-UCB algorithm using LoRA fine-tuning
 class ViT_UCB(BanditAlgo):
     def __init__(self, env, model_name="WinKawaks/vit-tiny-patch16-224", alpha=1.0, lambda_reg=1.0,
-                 lora_r=8, lora_alpha=16, lora_dropout=0.0, device="cuda"):
-        super().__init__(env)
+                 lora_r=8, lora_alpha=16, lora_dropout=0.0, device="cuda", detailed=True):
+        super().__init__(env, detailed)
         self.name = "vit_ucb"
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.alpha = float(alpha)

@@ -32,6 +32,31 @@ def rgba_to_rgb(image):
     else:
         image = image.convert("RGB")
     return image
+class ImageBanditEnv2:
+    def __init__(self, data_file, n, sigma, temp='temp'):
+        if data_file is None:
+            return
+        data = []
+        with open(data_file, 'r') as f:
+            for line in f:
+                line = json.loads(line)
+                if line['score']:
+                    data.append(line)
+        self.n = n
+        self.image_path = Path(temp)
+        self.image_path.mkdir(exist_ok=True)
+        self.data = []
+        for i in tqdm(data, desc="Loading images"):
+            try: response = requests.get(j['images']['jpg']['small_image_url'])
+            except: continue
+            if response.status_code == 200:
+                im_path = self.image_path.joinpath(f"{i['mal_id']}.jpg")
+                if im_path.is_file():
+                    image = Image.open(im_path)
+                else:
+                    image = Image.open(BytesIO(response.content))
+                    image.save(im_path)
+                self.data.append((image, i['score']))
 class ImageBanditEnv:
     transform = transforms.Compose([
         transforms.Resize((224, 224)),   # resize to model input
@@ -115,6 +140,39 @@ class ImageBanditEnv:
     def load(self, file='env.pkl'):
         with open(file, 'rb') as f:
             return pickle.load(f)
+        
+class ImageBanditEnv2(ImageBanditEnv):
+    def __init__(self, data_file, n, sigma, temp='temp'):
+        if data_file is None:
+            return
+        data = []
+        with open(data_file, 'r') as f:
+            for line in f:
+                line = json.loads(line)
+                if line['score']:
+                    data.append(line)
+        self.n = n
+        self.image_path = Path(temp)
+        self.image_path.mkdir(exist_ok=True)
+        self.data = []
+        for i in tqdm(data, desc="Loading images"):
+            try: response = requests.get(j['images']['jpg']['small_image_url'])
+            except: continue
+            if response.status_code == 200:
+                im_path = self.image_path.joinpath(f"{i['mal_id']}.jpg")
+                if im_path.is_file():
+                    image = Image.open(im_path)
+                else:
+                    image = Image.open(BytesIO(response.content))
+                    image.save(im_path)
+                self.data.append((image, i['score']))
+    def step(self, i):
+        return self.arms[i]
+
+    def get_contexts(self):
+        indices = random.sample(range(len(self.data)), self.n)
+        self.arms = [self.data[i][1] for i in indices]
+        return [self.data[i][0] for i in indices]
     
 class Experiment:
     def __init__(self, env, agents, results="results/"):
