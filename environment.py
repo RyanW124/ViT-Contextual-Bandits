@@ -155,23 +155,28 @@ class ImageBanditEnv2(ImageBanditEnv):
         self.image_path = Path(temp)
         self.image_path.mkdir(exist_ok=True)
         self.data = []
+        self.arms = [Arm(0, sigma, []) for _ in range(self.n)]
         for i in tqdm(data, desc="Loading images"):
-            try: response = requests.get(j['images']['jpg']['small_image_url'])
+            try: response = requests.get(i['images']['jpg']['small_image_url'])
             except: continue
-            if response.status_code == 200:
-                im_path = self.image_path.joinpath(f"{i['mal_id']}.jpg")
-                if im_path.is_file():
-                    image = Image.open(im_path)
-                else:
+            im_path = self.image_path.joinpath(f"{i['mal_id']}.jpg")
+            if im_path.is_file():
+                image = Image.open(im_path)
+            else:
+                if response.status_code == 200:
                     image = Image.open(BytesIO(response.content))
                     image.save(im_path)
-                self.data.append((image, i['score']))
+                else: continue
+            self.data.append((image, i['score']))
     def step(self, i):
-        return self.arms[i]
+        return self.arms[i].pull()
 
     def get_contexts(self):
         indices = random.sample(range(len(self.data)), self.n)
-        self.arms = [self.data[i][1] for i in indices]
+        self.best_mu = 0
+        for i, j in enumerate(indices):
+            self.arms[i].mu=  self.data[j][1]
+            self.best_mu = max(self.best_mu, self.data[j][1])
         return [self.data[i][0] for i in indices]
     
 class Experiment:
