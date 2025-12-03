@@ -387,7 +387,7 @@ class ViTRewardModel(nn.Module):
         out = self.mlp_head(feats)  # (1, 1)
         return out.view(-1)
 
-    def get_trainable_params(self):
+    def get_trainable_params(self, every=False):
         """Return parameters for UCB tracking (last block + MLP head)."""
         params = []
 
@@ -398,7 +398,7 @@ class ViTRewardModel(nn.Module):
 
         # LoRA adapters from last block
         for name, p in self.vit.named_parameters():
-            if "lora_" in name and "encoder.layer.11" in name and p.requires_grad:
+            if "lora_" in name and ("encoder.layer.11" in name or every) and p.requires_grad:
                 params.append(p)
         # for i in params:
         #     print(i.shape)
@@ -525,16 +525,6 @@ class ViT_UCB(BanditAlgo):
         # return preds
         return preds.numpy().astype(np.float64)
 
-    # def sherman_morrison_update(self, v):
-    #     # v: column vector shape (numel, 1) (numpy)
-    #     v = v.reshape(-1, 1)
-    #     s = float((v.T @ self.sigma_inv @ v).item())
-    #     denom = 1.0 + s
-    #     if denom <= 1e-12:
-    #         denom = 1e-12
-    #     self.sigma_inv = self.sigma_inv - (self.sigma_inv @ v @ v.T @ self.sigma_inv) / denom
-    #     # keep symmetric
-    #     self.sigma_inv = 0.5 * (self.sigma_inv + self.sigma_inv.T)
     @torch.no_grad()
     def sherman_morrison_update(self, v: torch.Tensor):
         """
@@ -572,12 +562,7 @@ class ViT_UCB(BanditAlgo):
                 x = torch.tensor(img, dtype=torch.float32).unsqueeze(0).to(self.device)
             grads[i] = self._grad_vector_for_tensor(x)
 
-        # compute bonuses: alpha * sqrt(g^T Sigma_inv g)
         bonuses = np.zeros((self.n_arms,), dtype=np.float64)
-        # for i in range(self.n_arms):
-        #     gi = grads[i].reshape(-1, 1)
-        #     val = float((gi.T @ self.sigma_inv @ gi).item())
-        #     bonuses[i] = self.alpha * np.sqrt(max(val, 0.0))
         vals = torch.einsum('bi,ij,bj->b', grads, self.sigma_inv, grads)  # shape: (n_arms,)
         
         # Ensure non-negative and compute bonuses
@@ -586,10 +571,6 @@ class ViT_UCB(BanditAlgo):
         # compute predicted rewards in batch (no grad)
         preds = self._batch_preds(contexts)  # shape (n_arms,)
         ucb_scores = preds + bonuses
-        # print(preds)
-        # print(bonuses)
-        # print(ucb_scores)
-        # print()
         chosen = int(np.argmax(ucb_scores))
         # call update with chosen arm and the bonus array (for logging)
         self.update(chosen, bonuses, contexts[chosen], preds)
@@ -609,20 +590,183 @@ class ViT_UCB(BanditAlgo):
         if self.t % self.train_every == 0:
             self.train()
 
-    # def train(self, steps=1):
-    #     # standard supervised regression on replay buffer to fit reward -> model(pixel_values)
-    #     for _ in range(steps):
-    #         x_batch, y_batch = self.replay.sample(self.train_batch)
-    #         if x_batch is None:
-    #             return
-    #         x = torch.tensor(x_batch, dtype=torch.float32).to(self.device)
-    #         y = torch.tensor(y_batch, dtype=torch.float32).to(self.device).view(-1, 1)
-    #         self.vit.model.train()
-    #         preds = self.vit.model(pixel_values=x).logits  # (B,1)
-    #         loss = F.mse_loss(preds, y)
-    #         self.optimizer.zero_grad()
-    #         loss.backward()
-    #         self.optimizer.step()
+    def train(self, steps=1):
+        """Train regression head on replay buffer (reward prediction)."""
+        for _ in range(steps):
+            x_batch, y_batch = self.replay.sample(self.train_batch)
+            if x_batch is None:
+                return
+            x = torch.tensor(x_batch, dtype=torch.float32).to(self.device)
+            y = torch.tensor(y_batch, dtype=torch.float32).to(self.device)
+
+            self.vit.train()
+            preds = self.vit(x)  # goes through vit + mlp_head
+            # print(preds.shape, y.shape)
+            loss = F.mse_loss(preds, y)
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
+
+
+class ViT_UCB_Diag(BanditAlgo):
+    def __init__(self, env, model_name="google/vit-base-patch16-224", alpha=1.0, lambda_reg=1.0,
+                 lora_r=8, lora_alpha=16, lora_dropout=0.0, device="cuda", detailed=True):
+        super().__init__(env, detailed)
+        self.name = "Diag"
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.alpha = float(alpha)
+        self.lambda_reg = float(lambda_reg)
+        self.env = env
+
+        # preprocessing transform (ViT-Base expects 224x224)
+        self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5,0.5,0.5], std=[0.5,0.5,0.5]),
+        ])
+
+        # model with LoRA
+        self.vit = ViTRewardModel(model_name=model_name, device=self.device,
+                          lora_r=lora_r, lora_alpha=lora_alpha, lora_dropout=lora_dropout)
+        # replay buffer shape matches (C,H,W)
+        self.replay = ReplayBufferFIFO((3, 224, 224), capacity=50)
+        # self.replay = ReplayBuffer((3, 224, 224), capacity=1000)
+        # optimizer only for trainable params (LoRA + classifier head)
+        self.optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.vit.parameters()), lr=1e-4)
+        # training hyperparams
+        self.train_batch = 32
+        self.train_every = 1  # train every 10 bandit steps
+        self.update_steps_per_train = 1
+
+        # get number of trainable params and initialize sigma_inv
+        self.trainable_params = self.vit.get_trainable_params(True)
+        self.numel = sum(p.numel() for p in self.trainable_params)
+
+        # store ONLY diagonal of Σ^{-1} = λI
+        self.sigma_inv_diag = (self.lambda_reg * torch.ones(self.numel, 
+                                                            dtype=torch.float32,
+                                                            device=self.device))
+
+        self.m = max(1, int(self.numel))
+        self._ones_cache = None
+    def offload_A(self):
+        self.sigma_inv.detach().cpu()
+        del self.sigma_inv
+        self.sigma_inv = None
+    def init_A(self):
+        self.sigma_inv_diag = (self.lambda_reg * torch.ones(self.numel, 
+                                                                    dtype=torch.float32,
+                                                                    device=self.device))
+    def _grad_vector_for_tensor(self, x_tensor):
+        """
+        Compute flattened gradient vector (numpy) of the model output w.r.t. trainable params for a single input.
+        x_tensor: torch.Tensor shape (1,C,H,W) on device
+        returns: 1D numpy vector shape (numel,)
+        """
+        # zero grads
+        self.optimizer.zero_grad()
+        # forward
+        out = self.vit.forward_scalar(x_tensor)  # returns 1-d tensor
+        # ensure ones for backward shape
+        if self._ones_cache is None or self._ones_cache.shape != out.shape:
+            self._ones_cache = torch.ones_like(out).to(out.device)
+        out.backward(self._ones_cache)  # accumulate grads into trainable params
+
+        # collect grads
+        grads = []
+        for p in self.trainable_params:
+            g = p.grad
+            if g is None:
+                grads.append(torch.zeros(p.numel(), device=self.device))
+            else:
+                grads.append(g.detach().view(-1))
+        if len(grads) == 0:
+            return np.zeros((self.numel,), dtype=np.float32)
+        grad_vector = torch.cat(grads)
+        # optional NTK scaling (paper uses 1/sqrt(m))
+        grad_vector = grad_vector / np.sqrt(self.m)
+        return grad_vector
+        # return grad_vector.cpu().numpy().astype(np.float64)
+    def _preprocess_pil_list(self, contexts):
+        tensors = []
+        for ctx in contexts:
+            x = self.transform(ctx)  # apply resize, ToTensor, normalize
+            tensors.append(x)
+
+        batch = torch.stack(tensors).to(self.device)
+        return batch
+    def _batch_preds(self, contexts):
+        # contexts: list of PIL images or tensors
+        batch = self._preprocess_pil_list(contexts)
+        preds = self.vit.predict(batch).view(-1)  # returns torch tensor (B,)
+        # return preds
+        return preds.numpy().astype(np.float64)
+
+    @torch.no_grad()
+    def sherman_morrison_update(self, v):
+        """
+        v: shape (numel, 1)
+        Σ^{-1} is stored as a diagonal vector self.sigma_inv_diag.
+        Update: d_i -= (d_i^2 * v_i^2) / (1 + sum(d_i * v_i^2))
+        """
+        if v.dim() == 2:
+            v = v.view(-1)
+    
+        d = self.sigma_inv_diag          # (numel,)
+        v2 = v * v                        # v_i^2
+    
+        # scalar s = v^T Σ^{-1} v
+        s = torch.sum(d * v2).item()
+        denom = 1.0 + max(s, 1e-12)
+    
+        # diag update
+        self.sigma_inv_diag = d - (d * d * v2) / denom
+
+
+    def select_arm(self):
+        # get contexts (PIL images) from env
+        contexts = self.env.get_contexts()  # should return list length n_arms
+        # compute grad vectors for each arm (could be expensive; we do one backward per arm)
+        grads = torch.zeros((self.n_arms, self.numel), dtype=torch.float32, device=self.device)
+        for i, img in enumerate(contexts):
+            # # preprocess single
+            if isinstance(img, Image.Image):
+                x = self.transform(img).unsqueeze(0).to(self.device)
+            else:
+                # assume tensor (C,H,W)
+                x = torch.tensor(img, dtype=torch.float32).unsqueeze(0).to(self.device)
+            grads[i] = self._grad_vector_for_tensor(x)
+
+        bonuses = np.zeros((self.n_arms,), dtype=np.float64)
+        vals = torch.sum((grads * grads) * self.sigma_inv_diag, dim=1) # shape: (n_arms,)
+        
+        # Ensure non-negative and compute bonuses
+        bonuses = self.alpha * torch.sqrt(torch.clamp(vals, min=0.0))
+        bonuses = bonuses.cpu().numpy()
+        # compute predicted rewards in batch (no grad)
+        preds = self._batch_preds(contexts)  # shape (n_arms,)
+        ucb_scores = preds + bonuses
+        chosen = int(np.argmax(ucb_scores))
+        # call update with chosen arm and the bonus array (for logging)
+        self.update(chosen, bonuses, contexts[chosen], preds)
+
+    def update(self, arm, bonus, context_image, preds):
+        reward = super().update(arm, bonus, preds)
+        # compute gradient vector for this chosen context and update sigma_inv
+        x=self.transform(context_image).unsqueeze(0).to(self.device)  # context_image
+
+        grad_vec = self._grad_vector_for_tensor(x).view(-1)
+        self.sherman_morrison_update(grad_vec)
+        # add context + reward to replay
+        # store as numpy array (C,H,W)
+        img_np = x.squeeze(0).cpu().numpy()
+        self.replay.add(img_np, reward)
+        # training schedule
+        if self.t % self.train_every == 0:
+            self.train()
+
     def train(self, steps=1):
         """Train regression head on replay buffer (reward prediction)."""
         for _ in range(steps):
