@@ -1,3 +1,5 @@
+"""Contains environment for image contextual bandit problems and experiment class for running experiments."""
+
 import numpy as np
 import json
 from scipy.ndimage import gaussian_filter1d
@@ -12,19 +14,39 @@ import requests, torch
 from tqdm.auto import tqdm
 
 class Arm:
+    """Arm for image contextual bandit problem used in ImageBanditEnv. (experiments 1 and 2 in paper)"""
     def __init__(self, mu, sigma, images):
+        
+        """
+        Initializes an Arm object.
+
+        Parameters
+        ----------
+        mu : float
+            The mean of the normal distribution.
+        sigma : float
+            The standard deviation of the normal distribution.
+        images : numpy.ndarray
+            The images associated with this arm.
+
+        Returns
+        -------
+        None
+        """
+
         self.mu = mu
         self.sigma = sigma
         self.images = images
         self.count = 0
     def context(self):
+        """Samples image"""
         return random.choice(self.images)
-        # idx = random.randint(0, self.images.shape[0]-1)
-        # return self.images[idx]
     def pull(self):
+        """Samples reward"""
         self.count += 1
         return np.random.normal(self.mu, self.sigma)
 def rgba_to_rgb(image):
+    """Converts an RGBA image to RGB."""
     if image.mode == "RGBA":
         background = Image.new("RGBA", image.size, (255, 255, 255, 255))  # white
         image = Image.alpha_composite(background, image)
@@ -32,38 +54,20 @@ def rgba_to_rgb(image):
     else:
         image = image.convert("RGB")
     return image
-class ImageBanditEnv2:
-    def __init__(self, data_file, n, sigma, temp='temp'):
-        if data_file is None:
-            return
-        data = []
-        with open(data_file, 'r') as f:
-            for line in f:
-                line = json.loads(line)
-                if line['score']:
-                    data.append(line)
-        self.n = n
-        self.image_path = Path(temp)
-        self.image_path.mkdir(exist_ok=True)
-        self.data = []
-        for i in tqdm(data, desc="Loading images"):
-            try: response = requests.get(j['images']['jpg']['small_image_url'])
-            except: continue
-            if response.status_code == 200:
-                im_path = self.image_path.joinpath(f"{i['mal_id']}.jpg")
-                if im_path.is_file():
-                    image = Image.open(im_path)
-                else:
-                    image = Image.open(BytesIO(response.content))
-                    image.save(im_path)
-                self.data.append((image, i['score']))
 class ImageBanditEnv:
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),   # resize to model input
-        transforms.ToTensor()
-    ])
+    """Environment for image contextual bandit problems used in experiments 1 and 2 in the paper. (Each arm has a fixed reward distribution)"""
     @classmethod
     def from_mnist(cls, path, sigma):
+        """
+        Creates an ImageBanditEnv object for experiment 1
+        
+        Parameters
+        ----------
+        path : str
+            The file containing the images.
+        sigma : float
+            The standard deviation of the normal distribution.
+        """
         ret = cls(None, 10, sigma)
         ret.arms = []
         bar = tqdm(total=6000, desc="Loading images")
@@ -82,6 +86,25 @@ class ImageBanditEnv:
             
             
     def __init__(self, data_file, n, sigma, temp='temp'):
+        
+        """
+        Initializes an ImageBanditEnv object for experiment 2.
+
+        Parameters
+        ----------
+        data_file : str
+            The file containing the JSON data.
+        n : int
+            The number of arms.
+        sigma : float
+            The standard deviation of the normal distribution.
+        temp : str, optional
+            The temporary directory to store the images. Defaults to 'temp'.
+        
+        Returns
+        -------
+        None
+        """
         if data_file is None:
             return
         data = []
@@ -142,7 +165,26 @@ class ImageBanditEnv:
             return pickle.load(f)
         
 class ImageBanditEnv2(ImageBanditEnv):
+    """Environment for esperiment 3 in paper"""
     def __init__(self, data_file, n, sigma, temp='temp'):
+        """
+        Initializes an ImageBanditEnv2 object.
+
+        Parameters
+        ----------
+        data_file : str
+            The file containing the JSON data.
+        n : int
+            The number of arms.
+        sigma : float
+            The standard deviation of the normal distribution.
+        temp : str, optional
+            The temporary directory to store the images. Defaults to 'temp'.
+
+        Returns
+        -------
+        None
+        """
         if data_file is None:
             return
         data = []
@@ -180,13 +222,48 @@ class ImageBanditEnv2(ImageBanditEnv):
         return [self.data[i][0] for i in indices]
     
 class Experiment:
+    """Class for running experiments"""
     def __init__(self, env, agents, results="results/"):
+        """
+        Initializes an Experiment object.
+
+        Parameters
+        ----------
+        env : ImageBanditEnv or ImageBanditEnv2
+            The environment to run the experiment on.
+        agents : list
+            A list of agents to run the experiment with.
+        results : str, optional
+            The directory to store the results. Defaults to 'results/'.
+        """
+
         self.results = Path(results)
         self.results.mkdir(exist_ok=True)
         self.agents = agents
         self.env = env
 
     def generate_results(self, smooth=0):
+        """
+        Generates plots for the experiment results.
+
+        Parameters
+        ----------
+        smooth : int, optional
+            The sigma value for the Gaussian filter to smooth the plots. Defaults to 0.
+
+        Generates the following plots:
+
+        - Cumulative RewardOver Time
+        - Cumulative RegretOver Time
+        - Loss Over Time
+        - Detailed plot of the agent's history, including the # of times chosen, UCB bonus, and UCB bonus 0-centered.
+
+        Saves all plots to the directory specified in the Experiment initialization.
+
+        Returns
+        -------
+        None
+        """
         self.results.mkdir(exist_ok=True)
         for agent in self.agents:
             plt.plot(agent.cum_reward_graph, label=agent.name)
@@ -248,5 +325,17 @@ class Experiment:
 
 
     def run(self, n_steps):
+        """
+        Runs the experiment for n_steps for each agent.
+
+        Parameters
+        ----------
+        n_steps : int
+            The number of time steps to run the experiment for.
+
+        Returns
+        -------
+        None
+        """
         for i in self.agents:
             i.run(n_steps)

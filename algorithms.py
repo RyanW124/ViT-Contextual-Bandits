@@ -1,3 +1,5 @@
+"""Contains all the contextual bandit algorithms."""
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -9,16 +11,27 @@ from environment import ImageBanditEnv
 from tqdm.auto import tqdm
 from peft import LoraConfig, get_peft_model, TaskType
 from transformers import ViTForImageClassification, AutoConfig
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
 from torchvision import transforms
+from PIL import Image
+from collections import deque
+
 # -----------------
 # Base Algorithm
 # -----------------
 class BanditAlgo:
+    """
+    Base class for all contextual bandit algorithms."""
     def __init__(self, env: ImageBanditEnv, detailed=True):
+        """
+        Initializes the BanditAlgo object.
+
+        Parameters
+        ----------
+        env : ImageBanditEnv
+            The environment object.
+        detailed : bool, optional
+            Whether to keep detailed records of the algorithm's progress. Defaults to True.
+        """
         self.name=""
         self.env = env
         self.n_arms = env.n
@@ -36,9 +49,34 @@ class BanditAlgo:
         self.cum_reward_graph = [0]
 
     def select_arm(self):
+        """
+        Selects an arm according to the algorithm's policy.
+
+        Returns
+        -------
+        int
+            The index of the selected arm.
+        """
         raise NotImplementedError
 
     def update(self, arm, bonus, preds):
+        """
+        Updates the algorithm's internal state after an arm is selected.
+
+        Parameters
+        ----------
+        arm : int
+            The index of the selected arm.
+        bonus : float or numpy array
+            The exploration bonus for the selected arm.
+        preds : numpy array
+            The predicted rewards for each arm.
+
+        Returns
+        -------
+        float
+            The reward obtained from the selected arm.
+        """
         reward = self.env.step(arm)
         self.history.append((arm, reward))
         self.counts[arm] += 1
@@ -62,51 +100,38 @@ class BanditAlgo:
             self.select_arm()
 
     
-
-# -----------------
-# UCB1 (non-contextual)
-# -----------------
-class UCB1(BanditAlgo):
-    def __init__(self, env):
-        super().__init__(env)
-        self.name="UCB1"
-    def select_arm(self):
-        total_counts = np.sum(self.counts)
-        if 0 in self.counts:
-            arm = np.argmin(self.counts)
-            bonus = np.sqrt(2 * np.log(total_counts) / (self.counts+0.01))
-        else:
-            bonus = np.sqrt(2 * np.log(total_counts) / self.counts)
-            ucb_vals = self.rewards / self.counts + bonus
-            arm = np.argmax(ucb_vals)
-        self.update(arm, bonus)
-
-
-# -----------------
-# Epsilon-Greedy
-# -----------------
-class EGreedy(BanditAlgo):
-    def __init__(self, n_arms, epsilon=0.1):
-        super().__init__(n_arms)
-        self.epsilon = epsilon
-
-    def select_arm(self, contexts=None):
-        if random.random() < self.epsilon:
-            return np.random.randint(self.n_arms)
-        avg_rewards = self.rewards / np.maximum(self.counts, 1)
-        return np.argmax(avg_rewards)
-
-
 # -----------------
 # LinUCB (on ViT embeddings)
 # -----------------
 class LinUCB(BanditAlgo):
+    """
+    LinUCB algorithm for contextual bandits. Utilizes context vectors are passed through a ViT model.
+    """
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor()
     ])
 
     def __init__(self, env, alpha=1.0, model_name="WinKawaks/vit-tiny-patch16-224", detailed=True):
+        
+        """
+        Initializes the LinUCB algorithm.
+
+        Parameters
+        ----------
+        env : BanditEnvironment
+            The environment the algorithm will interact with.
+        alpha : float, optional
+            The exploration-exploitation trade-off parameter. Defaults to 1.0.
+        model_name : str, optional
+            The name of the pre-trained ViT model to use. Defaults to "WinKawaks/vit-tiny-patch16-224".
+        detailed : bool, optional
+            Whether to keep detailed records of the algorithm's history. Defaults to True.
+
+        Returns
+        -------
+        None
+        """
         super().__init__(env, detailed)
         self.env = env
         self.alpha = alpha
@@ -114,11 +139,23 @@ class LinUCB(BanditAlgo):
         self.embed_dim = self.vit.config.hidden_size
         self.name = 'linucb'
 
-        # Single universal A and b across all arms
         self.A = np.identity(self.embed_dim)
         self.b = np.zeros((self.embed_dim, 1))
 
     def get_embedding(self, img):
+        """
+        Compute the embedding of an image using the pre-trained ViT model.
+
+        Parameters
+        ----------
+        img : numpy.ndarray
+            The image to compute the embedding of.
+
+        Returns
+        -------
+        emb : numpy.ndarray
+            The embedding of the image.
+        """
         with torch.no_grad():
             if len(img.shape) == 3:
                 img = img.unsqueeze(0)
@@ -169,53 +206,57 @@ class LinUCB(BanditAlgo):
 # -----------------
 # CNN-UCB
 # -----------------
-
-
-
-
 class CNNRewardNet(nn.Module):
+    """
+    CNNUCB's CNN for reward prediction.
+    """
     def __init__(self, input_channels=3):
         super().__init__()
         self.conv1 = nn.Conv2d(input_channels, 32, 3, padding=1)
         self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
         self.pool = nn.MaxPool2d(2, 2)
-        self.fc = nn.Linear(9216, 1)
-    
+        self.fc1 = nn.Linear(9216, 100)
+        self.fc2 = nn.Linear(100, 1)
+    def get_trainable_params(self):
+        """Return parameters that are tracked in matrix A (every param except fc1)."""
+        params = []
+        for name, param in self.named_parameters():
+            if "fc1" not in name and param.requires_grad:
+                params.append(param)
+        return params
     def forward(self, x):
         x = F.relu(self.conv1(x))
         x = self.pool(x)
         x = F.relu(self.conv2(x))
         x = self.pool(x)
         x = x.view(x.size(0), -1)
-        x = self.fc(x)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
         return x
 
-class ReplayBuffer:
-
-    def __init__(self, d, capacity):
-        self.buffer = {'context':np.zeros((capacity, *d)), 'reward': np.zeros((capacity,1))}
-        # print(self.buffer['context'].shape)
-        self.capacity = capacity
-        self.size = 0
-        self.pointer = 0
-
-
-    def add(self, context, reward):
-        self.buffer['context'][self.pointer] = context
-        self.buffer['reward'][self.pointer] = reward
-        self.size = min(self.size+1, self.capacity)
-        self.pointer = (self.pointer+1)%self.capacity
-
-    def sample(self, n):
-        idx = np.random.randint(0,self.size,size=min(self.size, n))
-        return self.buffer['context'][idx], self.buffer['reward'][idx].flatten()
-
 class CNN_UCB(BanditAlgo):
+    """
+    CNN-UCB algorithm for contextual bandits.
+    """
     transform = transforms.Compose([
         transforms.Resize((50, 50)),   # resize to model input
         transforms.ToTensor()
     ])
     def __init__(self, env, alpha=1.0, lambda_reg=1.0, model=CNNRewardNet, name="cnnucb", detailed=True):
+        
+        """
+        Initialize the CNN-UCB algorithm.
+
+        Parameters:
+        - env: a ContextualBanditEnv object
+        - alpha: the exploration hyperparameter
+        - lambda_reg: the regularization hyperparameter
+        - model: the reward model (default: CNNRewardNet)
+        - name: the name of the algorithm (default: "cnnucb")
+        - detailed: whether to log detailed information (default: True)
+
+        Note that the reward model is moved to the CUDA device if available.
+        """
         super().__init__(env, detailed)
         self.name = name
         self.device = torch.device("cuda")
@@ -229,11 +270,19 @@ class CNN_UCB(BanditAlgo):
         # Store gradient vectors for low-rank covariance approximation
         self.grad_list = []
         self.m=10
-        self.numel = sum(w.numel() for w in self.model.parameters() if w.requires_grad)
+        self.numel = sum(w.numel() for w in self.model.get_trainable_params() if w.requires_grad)
         # self.sigma_inv = lambda_reg * np.eye(self.numel, dtype=np.float32)
         self.sigma_inv = (self.lambda_reg * torch.eye(self.numel, dtype=torch.float32, device=self.device))
-        
+    
     def _preprocess_pil_list(self, contexts):
+        """
+        Preprocess a list of PIL images by applying resizing, ToTensor, and normalization.
+        
+        Parameters:
+        - contexts: a list of PIL images to preprocess
+        Returns:
+        - batch: a torch tensor of shape (B, 3, H, W) containing the preprocessed images
+        """
         tensors = []
         for ctx in contexts:
             x = self.transform(ctx)  # apply resize, ToTensor, normalize
@@ -241,19 +290,9 @@ class CNN_UCB(BanditAlgo):
 
         batch = torch.stack(tensors).to(self.device)
         return batch
-    def compute_grad_vector(self, x):
-        """Compute flattened gradient vector w.r.t. all parameters"""
-        out = self.model(x)
-        self.optimizer.zero_grad()
-        out.require_grad
-        out.backward()
-        grad_list = []
-        for param in self.model.parameters():
-            grad_list.append(param.grad.view(-1))
-        grad_vector = torch.cat(grad_list).detach()  # flattened vector
-        return grad_vector
     
     def select_arm(self):
+        """Selects arm based on CNNUCB algorithm."""
         ucb_scores = []
         g = torch.zeros((self.env.n, self.numel), dtype=torch.float32, device=self.device)
         contexts = self.env.get_contexts()
@@ -262,26 +301,22 @@ class CNN_UCB(BanditAlgo):
         with torch.no_grad():
             vals = torch.einsum('bi,ij,bj->b', g, self.sigma_inv, g)  # shape: (n_arms,)
             
-            # Ensure non-negative and compute bonuses
+            # compute bonuses
             bonus = self.alpha * torch.sqrt(torch.clamp(vals, min=0.0)).cpu().numpy().flatten()
-            # bonus =  self.alpha * np.sqrt(np.matmul(np.matmul(g[:, None, :], self.sigma_inv), g[:, :, None])[:, 0, :])
             preds = self.model(self._preprocess_pil_list(contexts)).cpu().numpy().flatten()
             ucb_scores =  preds +bonus
-                # Compute exploration bonus using stored gradients
-                # if len(self.grad_list) == 0:
-                #     bonus = 0
-                # else:
-                #     G = np.stack(self.grad_list, axis=1)  # shape: param_dim x t
-                #     print(G.shape[0])
-                #     A = self.lambda_reg * np.eye(G.shape[0]) + G @ G.T
-                #     grad_vec = self.compute_grad_vector(x)
-                #     bonus = self.alpha * np.sqrt(grad_vec.T @ np.linalg.inv(A) @ grad_vec)
-                
-                # ucb_scores.append(pred + bonus)
         arm = int(np.argmax(ucb_scores))
-        # print(arm, bonus, preds)
         self.update(arm, bonus, contexts[arm], preds)
     def grad(self, x):
+        """
+        Compute the gradient of the model output with respect to the model parameters (only for models tracked in matrix A)
+
+        Parameters:
+        - x: a tensor of shape (B, 3, H, W) containing the input images
+
+        Returns:
+        - grad: a tensor of shape (self.numel,) containing the gradient of the model output with respect to the model parameters, divided by the square root of m.
+        """
         if len(x.shape)<4:
             x = x.unsqueeze(0)
 
@@ -289,25 +324,21 @@ class CNN_UCB(BanditAlgo):
         self.optimizer.zero_grad()
         y.backward()
         return torch.cat(
-                [w.grad.detach().flatten() / np.sqrt(self.m) for w in self.model.parameters() if w.requires_grad]
+                [w.grad.detach().flatten() / np.sqrt(self.m) for w in self.model.get_trainable_params() if w.requires_grad]
             ).to(self.device)
     def sherman_morrison_update(self, v):
+        """Performs Sherman-Morrison update to update inverse"""
         self.sigma_inv -= (self.sigma_inv @ v @ v.T @ self.sigma_inv) / (1+v.T @ self.sigma_inv @ v)
     def update(self, arm, bonus, image, preds):
         reward = super().update(arm, bonus, preds)
         image = self.transform(image).to(self.device)
-        # pred = self.model(self.image_tensors[arm])
-        # loss = F.mse_loss(pred, r)
-        # self.optimizer.zero_grad()
-        # loss.backward()
-        # self.optimizer.step()
-        
         # store gradient for UCB (faithful to paper)
         self.sherman_morrison_update(self.grad(image)[:, None])
         self.replay.add(image.cpu().numpy(), reward)
         self.train()
     def train(self):
-        x, y = self.replay.sample(64)
+        """Train model on past 50 rewards"""
+        x, y = self.replay.sample(50)
         x = torch.tensor(x, dtype=torch.float32).to(self.device)
         y = torch.tensor(y, dtype=torch.float32).to(self.device)
         y_hat = self.model(x)
@@ -315,23 +346,15 @@ class CNN_UCB(BanditAlgo):
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+
+
 # -----------------
 # ViT-UCB
 # -----------------
 
-
-# ViT reward network wrapper with LoRA
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-from transformers import AutoConfig, ViTForImageClassification
-from peft import get_peft_model, LoraConfig, TaskType
-from torchvision import transforms
-from PIL import Image
-
-
 class ViTRewardModel(nn.Module):
+    """
+    Reward model for ViT-UCB algorithm."""
     def __init__(self, model_name="WinKawaks/vit-tiny-patch16-224", device="cuda",
                  lora_r=8, lora_alpha=16, lora_dropout=0.0):
         super().__init__()
@@ -366,7 +389,6 @@ class ViTRewardModel(nn.Module):
         self.to(self.device)
 
     def predict(self, tensor_batch):
-        """Forward in eval mode, return predictions (no grad)."""
         self.eval()
         with torch.no_grad():
             feats = self.vit(pixel_values=tensor_batch).logits  # (B, 1000)
@@ -374,13 +396,11 @@ class ViTRewardModel(nn.Module):
 
             return out.view(-1).cpu()
     def forward(self, tensor_batch):
-        """Forward in eval mode, return predictions (no grad)."""
         feats = self.vit(pixel_values=tensor_batch).logits  # (B, 1000)
         out = self.mlp_head(feats)  # (B, 1)
         return out.view(-1)
 
     def forward_scalar(self, x_tensor):
-        """Forward pass returning scalar tensor for gradient computation."""
         self.train()
         feats = self.vit(pixel_values=x_tensor).logits  # (1, 1000)
 
@@ -390,35 +410,16 @@ class ViTRewardModel(nn.Module):
     def get_trainable_params(self, every=False):
         """Return parameters for UCB tracking (last block + MLP head)."""
         params = []
-
-        # Last transformer block if available
-        # last_block = list(self.vit.vit.encoder.layer)[-1] if hasattr(self.vit, "vit") else None
-        # if last_block is not None:
-        #     params += [p for p in last_block.parameters() if p.requires_grad]
-
         # LoRA adapters from last block
         for name, p in self.vit.named_parameters():
             if "lora_" in name and ("encoder.layer.11" in name or every) and p.requires_grad:
                 params.append(p)
-        # for i in params:
-        #     print(i.shape)
-        # print()
         # Add MLP head params
         params += [p for p in self.mlp_head.parameters() if p.requires_grad]
-        # print( [p for p in self.mlp_head.parameters() if p.requires_grad])
         return params
 
-
-# ================== in ViT_UCB ==================
-# replace this line in __init__:
-
-
-
-# replace training section:
-from collections import deque
-
 class ReplayBufferFIFO:
-
+    """FIFO replay buffer."""
     def __init__(self, d, capacity):
         self.buffer = {'context':deque(maxlen=capacity), 'reward': deque(maxlen=capacity),}
         # print(self.buffer['context'].shape)
@@ -432,10 +433,41 @@ class ReplayBufferFIFO:
     def sample(self, n):
         return np.array(self.buffer['context']), np.array(self.buffer['reward']).flatten()
 
-# ViT-UCB algorithm using LoRA fine-tuning
+
 class ViT_UCB(BanditAlgo):
+    """
+    ViT-UCB algorithm.
+    """
     def __init__(self, env, model_name="WinKawaks/vit-tiny-patch16-224", alpha=1.0, lambda_reg=1.0,
                  lora_r=8, lora_alpha=16, lora_dropout=0.0, device="cuda", detailed=True):
+        """
+        Initializes the ViT-UCB algorithm.
+
+        Parameters
+        ----------
+        env : BanditEnvironment
+            The environment the algorithm will interact with.
+        model_name : str, optional
+            The name of the pre-trained ViT model to use. Defaults to "WinKawaks/vit-tiny-patch16-224".
+        alpha : float, optional
+            The exploration-exploitation trade-off parameter. Defaults to 1.0.
+        lambda_reg : float, optional
+            The regularization strength for LoRA. Defaults to 1.0.
+        lora_r : int, optional
+            The rank of the LoRA approximation. Defaults to 8.
+        lora_alpha : int, optional
+            The alpha hyperparameter for LoRA. Defaults to 16.
+        lora_dropout : float, optional
+            The dropout rate used in LoRA. Defaults to 0.0.
+        device : str, optional
+            The device to use for computations. Defaults to "cuda" if available, otherwise "cpu".
+        detailed : bool, optional
+            Whether to keep detailed records of the algorithm's history. Defaults to True.
+
+        Returns
+        -------
+        None
+        """
         super().__init__(env, detailed)
         self.name = "vit_ucb"
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -466,9 +498,6 @@ class ViT_UCB(BanditAlgo):
         # get number of trainable params and initialize sigma_inv
         self.trainable_params = self.vit.get_trainable_params()
         self.numel = sum(p.numel() for p in self.trainable_params)
-        # initialize inverse covariance as lambda * I (numpy)
-        # self.sigma_inv = (self.lambda_reg * np.eye(self.numel, dtype=np.float64))
-        
         self.init_A()
         # number used for gradient normalization (NTK scaling)
         self.m = max(1, int(self.numel))  # fallback
@@ -482,7 +511,7 @@ class ViT_UCB(BanditAlgo):
         self.sigma_inv = (self.lambda_reg * torch.eye(self.numel, dtype=torch.float32, device=self.device))
     def _grad_vector_for_tensor(self, x_tensor):
         """
-        Compute flattened gradient vector (numpy) of the model output w.r.t. trainable params for a single input.
+        Compute flattened gradient vector (only for params tracked in matrix A)
         x_tensor: torch.Tensor shape (1,C,H,W) on device
         returns: 1D numpy vector shape (numel,)
         """
@@ -528,7 +557,7 @@ class ViT_UCB(BanditAlgo):
     @torch.no_grad()
     def sherman_morrison_update(self, v: torch.Tensor):
         """
-        Sherman–Morrison rank-1 inverse update in PyTorch.
+        Sherman–Morrison rank-1 inverse update.
         Args:
             v: column vector of shape (numel, 1), on same device as self.sigma_inv
         """
@@ -550,6 +579,10 @@ class ViT_UCB(BanditAlgo):
 
     def select_arm(self):
         # get contexts (PIL images) from env
+        """
+        Select the arm to pull based on the ViTUCB algorithm.
+        """
+
         contexts = self.env.get_contexts()  # should return list length n_arms
         # compute grad vectors for each arm (could be expensive; we do one backward per arm)
         grads = torch.zeros((self.n_arms, self.numel), dtype=torch.float32, device=self.device)
@@ -591,7 +624,7 @@ class ViT_UCB(BanditAlgo):
             self.train()
 
     def train(self, steps=1):
-        """Train regression head on replay buffer (reward prediction)."""
+        """Train on replay buffer (reward prediction)."""
         for _ in range(steps):
             x_batch, y_batch = self.replay.sample(self.train_batch)
             if x_batch is None:
@@ -611,6 +644,7 @@ class ViT_UCB(BanditAlgo):
 
 
 class ViT_UCB_Diag(BanditAlgo):
+    """ViT UCB but only stores diagonal entries of A"""
     def __init__(self, env, model_name="google/vit-base-patch16-224", alpha=1.0, lambda_reg=1.0,
                  lora_r=8, lora_alpha=16, lora_dropout=0.0, device="cuda", detailed=True):
         super().__init__(env, detailed)
@@ -632,7 +666,6 @@ class ViT_UCB_Diag(BanditAlgo):
                           lora_r=lora_r, lora_alpha=lora_alpha, lora_dropout=lora_dropout)
         # replay buffer shape matches (C,H,W)
         self.replay = ReplayBufferFIFO((3, 224, 224), capacity=50)
-        # self.replay = ReplayBuffer((3, 224, 224), capacity=1000)
         # optimizer only for trainable params (LoRA + classifier head)
         self.optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.vit.parameters()), lr=1e-4)
         # training hyperparams
@@ -660,11 +693,6 @@ class ViT_UCB_Diag(BanditAlgo):
                                                                     dtype=torch.float32,
                                                                     device=self.device))
     def _grad_vector_for_tensor(self, x_tensor):
-        """
-        Compute flattened gradient vector (numpy) of the model output w.r.t. trainable params for a single input.
-        x_tensor: torch.Tensor shape (1,C,H,W) on device
-        returns: 1D numpy vector shape (numel,)
-        """
         # zero grads
         self.optimizer.zero_grad()
         # forward
@@ -768,7 +796,6 @@ class ViT_UCB_Diag(BanditAlgo):
             self.train()
 
     def train(self, steps=1):
-        """Train regression head on replay buffer (reward prediction)."""
         for _ in range(steps):
             x_batch, y_batch = self.replay.sample(self.train_batch)
             if x_batch is None:

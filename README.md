@@ -1,5 +1,6 @@
 # ViT Contextual Bandits
 
+[Paper](others/Final%20Draft.pdf)
 ## 📋 Overview
 
 A research project exploring the integration of Vision Transformers (ViT) with Upper Confidence Bound (UCB) algorithms for contextual image-based bandit learning. The project finetunes a ViT using LoRA as rewards estimate and leverages neural tangent kernels as exploration bonus. In a nutshell, the UCB score is calculated as 
@@ -21,6 +22,28 @@ where $`{A}_t = \lambda {I} + \sum_{i=1}^t \frac{{g}_{\text{ViT}}({x}_i; {\theta
 | 2025-10-28 | **Rough Proof of UCB Bound** | Came up with rough proof that the difference between true reward and reward estimate is bounded by the exploration bonus: $`\left\lvert f^*({x}) - f_{\mathrm{ViT}}({x}; {\theta}_{\mathrm{ViT}}, {\theta}_{\mathrm{LoRA}}) \right\rvert \le \alpha \,\left\lVert \frac{{g}_{\mathrm{ViT}}({x}; {\theta}_{\mathrm{LoRA}})}{\sqrt{d_{\mathrm{LoRA}}}} \right\rVert_{{A}_t^{-1}} + \beta`$ |
 | 2025-11-02 | **Hyperparameter Tuning** | Tune hyperparameters of algorithms, using [hyperparameter tune.ipynb](hyperparameter%20tune.ipynb) |
 | 2025-11-05 | **Experiment 1** | Experiment on handwritten digit dataset, with tuned hyperparameters. Results found in [mnist results](mnist%20results/) |
-| 2025-11-08 | **Experiment 2** | Experiment on anime dataset, with tuned hyperparameters. Results found in [anime results](anime%20results/) |
-| 2025-11-11 | **Midterm Presentation** | Presented project idea to class. Slides found [here](others/Midterm%20Presentation.pdf) |
-| In Progress | **Paper First Draft** | Write paper detailing results and findings |
+| 2025-11-08 | **Experiment 2** | Experiment on anime dataset (each arm has fixed reward dist), with tuned hyperparameters. Results found in [anime results](anime%20results/) |
+| 2025-11-11 | **Midterm Presentation** | Presented midterm updates. Slides found [here](others/Midterm%20Presentation.pdf) |
+| 2025-11-22 | **Experiment 3** | Second experiment on anime dataset (arms do not have fixed reward dist). Results found in [anime2 results](anime2%20results/) |
+| 2025-11-23 | **Paper First Draft** | Write paper detailing results and findings |
+| 2025-12-03 | **Approximating A** | Experiment on testing different ways of approximating the matrix A. Results found in [diag results](diag%20results/) |
+| 2025-12-09 | **Final Presentation** | Final presentation of project. Slides found [here](others/Final%20Presentation.pdf) |
+| In Progress | **Paper Final Draft** | Revising paper based on feedback. Paper can be found [here](others/Final%20Draft.pdf) |
+
+## 🧪 Reproducing Results
+
+1. Clone the repo using
+```bash
+git clone https://github.com/RyanW124/ViT-Contextual-Bandits
+cd ViT-Contextual-Bandits
+pip install -r requirements.txt
+```
+2. Prepare data using [data_fetch.ipynb](data_fetch.ipynb)
+3. Optional. Tune hyperparameters used in experiment through [hyperparameter tune.ipynb](hyperparameter%20tune.ipynb)
+4. Run experiments using [experiment.ipynb](experiment.ipynb)
+
+## Acknowledgements
+
+Special thanks to Professor Goldstein for providing guidance and feedback on the project. 
+
+Special thanks to UMIACS for providing compute instances.
