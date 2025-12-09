@@ -1,5 +1,5 @@
 # Preliminary Results
-This directory contains the preliminary results of the ViT-UCB algorithm on a test environment as a proof of concept. The dataset used is handwritten digits from [this dataset](https://www.kaggle.com/datasets/jcprogjava/handwritten-digits-dataset-not-in-mnist), where each arm corresponds to images of each digit, with STD=3. For example, arm 5 has contexts of handwritten 5s and the rewards are pulled from \(N(5, 3^2)\). The experiments were conducted in the [experiment.ipynb](/experiment.ipynb) notebook.
+This directory contains the preliminary results of the ViT-UCB algorithm on a test environment as a proof of concept. The dataset used is handwritten digits from [this dataset](https://www.kaggle.com/datasets/jcprogjava/handwritten-digits-dataset-not-in-mnist), where each arm corresponds to images of each digit, with STD=3. For example, arm 5 has contexts of handwritten 5s and the rewards are pulled from $`N(5, 3^2)`$. The experiments were conducted in the [experiment.ipynb](/experiment.ipynb) notebook.
 
 ## Results
 
