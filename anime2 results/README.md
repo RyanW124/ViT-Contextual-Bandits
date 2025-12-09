@@ -5,8 +5,10 @@ This directory contains the results of the ViT-UCB algorithm and baselines on ex
 
 ### Cumulative Regret
 ![Cumulative Regret](./Cumulative_Regret.png)
+
 The regret curves look less ideal, but ViTUCB still remains the best. This is expected because ViT's advantage in global context allows it to better relationship between a thumbnail and its corresponding rating. 
 
 ### Reward Estimate Loss
 ![Loss](./Loss.png)
+
 Each model's reward estimate error. ViTUCB having the lowest loss show that it was able to capture the context-reward relationship better than CNNUCB and LinUCB.

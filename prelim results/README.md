@@ -8,8 +8,10 @@ The results show that ViTUCB is a viable contextual bandits algorithm. The hyper
 ### Cumulative Regret
 
 ![Cumulative Regret](./Regret.png)
+
 We can see that the ViTUCB was able to achieve a logarithmic-shaped regret, meaning that the agent was able to learn the optimal policy
 
 ### Exploration Bonus
 ![ViT UCB](./vit_ucb_detail.png)
+
 The graph shows the number times each arm was picked and its exploration bonus over time. As we can see, arm 8 and 9 had the highest count and they had the lowest exploration bonus, as intended
